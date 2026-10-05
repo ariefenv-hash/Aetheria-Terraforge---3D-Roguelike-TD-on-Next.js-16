@@ -105,3 +105,36 @@ Stage Summary:
 - 新增 4 个组件文件、1 个管理器文件；修改 5 个核心组件
 - Lint 0 errors，dev server 0 runtime errors
 - 截图证据：`/home/z/my-project/download/aetheria-{startmenu,hotkeys,shift-build,rightclick-cancel2,escape-cancel,autopause,back-to-menu,defeat-final,career-updated}.png`
+
+---
+Task ID: 3
+Agent: main (Super Z)
+Task: 推送代码到用户 GitHub 仓库 + 部署到 Vercel（用户提供的 Token）
+
+Work Log:
+- GitHub 推送：
+  * 仓库 URL: https://github.com/ariefenv-hash/Aetheria-Terraforge---3D-Roguelike-TD-on-Next.js-16
+  * 使用一次性 URL 推送 (https://user:token@github.com/...)，Token 未保存到 git remote 配置
+  * git push --force main:main → 推送成功，3 个 commits 全部上传
+  * 用 GitHub API 验证 commits 已出现在远程仓库
+
+- Vercel 部署：
+  * 安装 vercel@62.4.0 (bun add -g vercel)
+  * 用 Vercel Token 验证身份 → ariefenv-hash (hobby plan)
+  * `vercel link --project aetheria-terraforge` 创建项目并链接
+  * `vercel --prod --yes` 执行生产部署
+  * 构建过程：bun install (约 30s) → next build (11.1s 编译 + 33s 输出)
+  * **总耗时 48 秒**
+  * 部署状态：READY ✓
+
+- 验证：
+  * 通过 Vercel API 确认 deployment state = READY
+  * curl 直接访问 https://aetheria-terraforge.vercel.app/ → HTML 正确返回
+  * Agent Browser 加载 → StartMenu 完整渲染（4 个 biome + 3 个难度 + 无尽模式 + 战绩面板）
+
+Stage Summary:
+- GitHub 仓库: https://github.com/ariefenv-hash/Aetheria-Terraforge---3D-Roguelike-TD-on-Next.js-16 ✓
+- Vercel URL: https://aetheria-terraforge.vercel.app ✓ (READY)
+- 部署 alias: https://aetheria-terraforge.vercel.app (主域名)
+- 部署详情: https://aetheria-terraforge-d6p89syvm-ariefenv-hash.vercel.app
+- 项目已在 Vercel Dashboard 可见，后续 git push 到 main 分支会自动触发 Vercel 重新部署

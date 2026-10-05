@@ -3,7 +3,17 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { ThreeRenderer } from '@/game/threeRenderer';
 import { GameState } from '@/game/gameState';
-import { GridTile, MapData, PlacedTower, Relic, SaveGameSlot, TerraformTool, TowerType } from '@/types/game';
+import {
+  Achievement,
+  Difficulty,
+  GridTile,
+  MapData,
+  PlacedTower,
+  Relic,
+  SaveGameSlot,
+  TerraformTool,
+  TowerType,
+} from '@/types/game';
 import { soundManager } from '@/audio/soundManager';
 import { HeaderBar } from '@/components/game/HeaderBar';
 import { TerraformToolbar } from '@/components/game/TerraformToolbar';
@@ -14,12 +24,21 @@ import { CodexModal } from '@/components/game/CodexModal';
 import { LevelEditorModal } from '@/components/game/LevelEditorModal';
 import { SavesModal } from '@/components/game/SavesModal';
 import { GameOverModal } from '@/components/game/GameOverModal';
+import { StartMenu, RunConfig } from '@/components/game/StartMenu';
+import { HotkeysPanel } from '@/components/game/HotkeysPanel';
+import { AchievementToast } from '@/components/game/AchievementToast';
 import { TOWER_CONFIGS } from '@/game/gameData';
+import { profileManager } from '@/game/profileManager';
+import { generateProceduralMap } from '@/game/proceduralMap';
 
 export default function AetheriaApp() {
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<ThreeRenderer | null>(null);
   const gameStateRef = useRef<GameState | null>(null);
+
+  // Phase: 'menu' until a run is configured, then 'playing'
+  const [phase, setPhase] = useState<'menu' | 'playing'>('menu');
+  const [runConfig, setRunConfig] = useState<RunConfig | null>(null);
 
   // Reactive UI state
   const [tickCounter, setTickCounter] = useState(0);
@@ -32,6 +51,7 @@ export default function AetheriaApp() {
   const [isCodexOpen, setIsCodexOpen] = useState(false);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [isSavesOpen, setIsSavesOpen] = useState(false);
+  const [isHotkeysOpen, setIsHotkeysOpen] = useState(false);
   const [gameOverState, setGameOverState] = useState<{ open: boolean; victory: boolean }>({
     open: false,
     victory: false,
@@ -39,18 +59,26 @@ export default function AetheriaApp() {
 
   const [isMuted, setIsMuted] = useState(soundManager.getMuted());
   const [notification, setNotification] = useState<string | null>(null);
+  const [achievementQueue, setAchievementQueue] = useState<Achievement[]>([]);
 
-  const showNotification = (msg: string) => {
+  const showNotification = useCallback((msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 2500);
-  };
+  }, []);
 
-  // Initialize Game & 3D Renderer
+  /** Track whether a game over has already been recorded to avoid double-counting. */
+  const gameOverRecordedRef = useRef(false);
+
+  // Initialize Game & 3D Renderer — runs once when entering 'playing' phase.
   useEffect(() => {
-    if (!canvasContainerRef.current) return;
+    if (phase !== 'playing' || !canvasContainerRef.current || !runConfig) return;
 
-    const game = new GameState();
+    // Build a fresh procedural map for the chosen biome, then a game state with
+    // the chosen difficulty + endless flag.
+    const customMap = generateProceduralMap(runConfig.biome);
+    const game = new GameState(customMap, runConfig.difficulty, runConfig.endlessMode);
     gameStateRef.current = game;
+    gameOverRecordedRef.current = false;
 
     const renderer = new ThreeRenderer(canvasContainerRef.current);
     rendererRef.current = renderer;
@@ -62,7 +90,7 @@ export default function AetheriaApp() {
       game.mapData.depth,
       game.mapData.spawns,
       game.mapData.heartCore,
-      game.mapData.biome
+      game.mapData.biome,
     );
     renderer.setWeather(game.currentWeather);
 
@@ -73,6 +101,29 @@ export default function AetheriaApp() {
       },
       onGameOver: (victory) => {
         setGameOverState({ open: true, victory });
+        // Record run to persistent profile (only once per game over)
+        if (!gameOverRecordedRef.current) {
+          gameOverRecordedRef.current = true;
+          const newlyUnlocked = profileManager.recordRun({
+            victory,
+            wave: game.currentWave,
+            bossesSlain: game.stats.bossesSlain,
+            tilesTerraformed: game.stats.tilesTerraformed,
+            towersBuilt: game.stats.towersBuilt,
+            score:
+              game.stats.enemiesDefeated * 10 +
+              game.currentWave * 100 +
+              game.stats.bossesSlain * 500,
+            biome: game.mapData.biome,
+            difficulty: game.difficulty,
+            ironDefender:
+              victory &&
+              game.heartHealth >= game.maxHeartHealth * 0.8,
+          });
+          if (newlyUnlocked.length > 0) {
+            setAchievementQueue((q) => [...q, ...newlyUnlocked]);
+          }
+        }
       },
       onRelicDraftOpen: (relics) => {
         setDraftRelics(relics);
@@ -81,7 +132,7 @@ export default function AetheriaApp() {
     };
 
     // Tile click handler from 3D canvas
-    renderer.onTileClick = (x: number, z: number) => {
+    renderer.onTileClick = (x: number, z: number, shiftHeld: boolean) => {
       const g = gameStateRef.current;
       if (!g) return;
 
@@ -94,22 +145,35 @@ export default function AetheriaApp() {
         if (canBuild) {
           renderer.updateTowers(g.placedTowers, g.mapData.tiles);
           showNotification(`成功构筑防御工事于 [${x}, ${z}]`);
-          g.selectedTowerToBuild = null;
-          setSelectedTower(null);
-          renderer.hideRangePreview();
+          // If shift held, keep selection for continuous building.
+          if (!shiftHeld) {
+            g.selectedTowerToBuild = null;
+            setSelectedTower(null);
+            renderer.hideRangePreview();
+          } else {
+            // Re-show range preview at the just-built tile for next click
+            renderer.setRangePreview(
+              TOWER_CONFIGS[g.selectedTowerToBuild].range,
+              x,
+              z,
+              tile.height,
+            );
+          }
         } else {
           showNotification('无法在此地块建造 (资源不足或地基不稳)');
         }
         return;
       }
 
-      // If terraforming
+      // If terraforming (shift also enables continuous terraform dragging)
       if (g.selectedTool !== 'inspect') {
         const terraformed = g.applyTerraform(x, z, g.selectedTool);
         if (terraformed) {
           renderer.updateTile(tile, g.mapData.biome);
-          showNotification(`地貌重塑成功: [${x}, ${z}]`);
-        } else {
+          if (!shiftHeld) {
+            showNotification(`地貌重塑成功: [${x}, ${z}]`);
+          }
+        } else if (!shiftHeld) {
           showNotification('无法重塑该地块 (印记或原石不足)');
         }
         return;
@@ -130,7 +194,8 @@ export default function AetheriaApp() {
       if (g.selectedTowerToBuild) {
         const cfg = TOWER_CONFIGS[g.selectedTowerToBuild];
         const elevationBonus = Math.max(0, tile.height - 1) * cfg.elevationBonusRange;
-        const totalRange = (cfg.range + elevationBonus) * g.gameModifiers.towerRangeMult[g.selectedTowerToBuild];
+        const totalRange =
+          (cfg.range + elevationBonus) * g.gameModifiers.towerRangeMult[g.selectedTowerToBuild];
         renderer.setRangePreview(totalRange, tile.x, tile.z, tile.height);
       }
     };
@@ -159,8 +224,24 @@ export default function AetheriaApp() {
     return () => {
       cancelAnimationFrame(animId);
       renderer.destroy();
+      gameStateRef.current = null;
+      rendererRef.current = null;
     };
-  }, []);
+  }, [phase, runConfig, showNotification]);
+
+  // Auto-pause when window loses focus (saves players from AFK deaths)
+  useEffect(() => {
+    if (phase !== 'playing') return;
+    const onBlur = () => {
+      const g = gameStateRef.current;
+      if (g && g.isWaveInProgress && !g.isPaused) {
+        g.isPaused = true;
+        showNotification('窗口失焦·已自动暂停');
+      }
+    };
+    window.addEventListener('blur', onBlur);
+    return () => window.removeEventListener('blur', onBlur);
+  }, [phase, showNotification]);
 
   // Sync tool selection with gameState
   const handleSelectTool = (tool: TerraformTool) => {
@@ -184,8 +265,15 @@ export default function AetheriaApp() {
 
   // Keyboard controls
   useEffect(() => {
+    if (phase !== 'playing') return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isEditorOpen || isCodexOpen || isSavesOpen || draftRelics.length > 0) return;
+      if (isEditorOpen || isCodexOpen || isSavesOpen || draftRelics.length > 0 || gameOverState.open) {
+        // Only allow Escape / H to close hotkeys; block other keys
+        if (e.key.toUpperCase() === 'H') {
+          setIsHotkeysOpen((v) => !v);
+        }
+        return;
+      }
 
       const key = e.key.toUpperCase();
       const g = gameStateRef.current;
@@ -199,6 +287,9 @@ export default function AetheriaApp() {
         handleSelectTower(null);
         handleSelectTool('inspect');
         setInspectedTile(null);
+        setIsHotkeysOpen(false);
+      } else if (key === 'H') {
+        setIsHotkeysOpen((v) => !v);
       } else if (key === 'Q') handleSelectTool('inspect');
       else if (key === 'W') handleSelectTool('elevate');
       else if (key === 'E') handleSelectTool('lower');
@@ -216,7 +307,7 @@ export default function AetheriaApp() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isEditorOpen, isCodexOpen, isSavesOpen, draftRelics]);
+  }, [isEditorOpen, isCodexOpen, isSavesOpen, draftRelics, phase, gameOverState.open]);
 
   const handleStartWave = () => {
     const g = gameStateRef.current;
@@ -237,25 +328,30 @@ export default function AetheriaApp() {
     }
   };
 
+  const handleStartRun = (cfg: RunConfig) => {
+    setRunConfig(cfg);
+    setPhase('playing');
+  };
+
+  const handleReturnToMenu = () => {
+    setPhase('menu');
+    setGameOverState({ open: false, victory: false });
+    setInspectedTile(null);
+    setSelectedTower(null);
+    setSelectedTool('inspect');
+    setIsHotkeysOpen(false);
+  };
+
   const handleRestart = (biome: 'alpine' | 'volcano' | 'marsh' | 'crystal_abyss') => {
-    const newGame = new GameState();
-    newGame.mapData.biome = biome;
-    gameStateRef.current = newGame;
-
-    const r = rendererRef.current;
-    if (r) {
-      r.buildTerrain(
-        newGame.mapData.tiles,
-        newGame.mapData.width,
-        newGame.mapData.depth,
-        newGame.mapData.spawns,
-        newGame.mapData.heartCore,
-        biome
-      );
-      r.setWeather(newGame.currentWeather);
-      r.updateTowers([], newGame.mapData.tiles);
-    }
-
+    const currentCfg = runConfig || { biome, difficulty: 'adept' as Difficulty, endlessMode: false };
+    const cfg: RunConfig = { ...currentCfg, biome };
+    setRunConfig(cfg);
+    // Force remount of game by toggling phase
+    setPhase('menu');
+    setTimeout(() => {
+      setRunConfig(cfg);
+      setPhase('playing');
+    }, 50);
     setGameOverState({ open: false, victory: false });
     setInspectedTile(null);
     setSelectedTower(null);
@@ -264,8 +360,12 @@ export default function AetheriaApp() {
   };
 
   const handlePlaytestCustomMap = (customMap: MapData) => {
-    const newGame = new GameState(customMap);
-    gameStateRef.current = newGame;
+    // For playtest, use the current difficulty (default adept) and standard mode.
+    if (gameStateRef.current) {
+      const newGame = new GameState(customMap, runConfig?.difficulty || 'adept', false);
+      gameStateRef.current = newGame;
+      gameOverRecordedRef.current = false;
+    }
 
     const r = rendererRef.current;
     if (r) {
@@ -275,9 +375,11 @@ export default function AetheriaApp() {
         customMap.depth,
         customMap.spawns,
         customMap.heartCore,
-        customMap.biome
+        customMap.biome,
       );
-      r.setWeather(newGame.currentWeather);
+      if (gameStateRef.current) {
+        r.setWeather(gameStateRef.current.currentWeather);
+      }
       r.updateTowers([], customMap.tiles);
     }
 
@@ -292,8 +394,27 @@ export default function AetheriaApp() {
       ? game.placedTowers.find((t) => t.id === inspectedTile.towerId) || null
       : null;
 
+  // Start menu takes precedence over the canvas while waiting for a config.
+  if (phase === 'menu') {
+    return (
+      <StartMenu
+        onStart={handleStartRun}
+        onOpenCodex={() => setIsCodexOpen(true)}
+      />
+    );
+  }
+
   return (
-    <div className="relative w-screen h-screen overflow-hidden select-none bg-[#0c0a08]">
+    <div
+      className="relative w-screen h-screen overflow-hidden select-none bg-[#0c0a08]"
+      onContextMenu={(e) => {
+        // Right-click cancels current selection
+        e.preventDefault();
+        handleSelectTower(null);
+        handleSelectTool('inspect');
+        setInspectedTile(null);
+      }}
+    >
       {/* 3D WebGL Canvas Viewport */}
       <div ref={canvasContainerRef} className="absolute inset-0 cursor-crosshair" />
 
@@ -341,6 +462,7 @@ export default function AetheriaApp() {
             soundManager.playClick();
             rendererRef.current?.resetCameraView();
           }}
+          onReturnToMenu={handleReturnToMenu}
         />
       )}
 
@@ -402,6 +524,15 @@ export default function AetheriaApp() {
         </div>
       )}
 
+      {/* Quick hotkey hint when nothing selected (auto-fades) */}
+      {game && !isWaveInProgressActive(game) && !selectedTower && selectedTool === 'inspect' && (
+        <div className="absolute top-1/2 right-4 -translate-y-1/2 z-10 pointer-events-none hidden md:block">
+          <div className="parchment-card px-3 py-2 rounded-xl border border-[#634f35] text-[10px] text-[#aa9578] font-cinzel">
+            按 <kbd className="font-mono-code text-[#ffd700]">H</kbd> 查看快捷键
+          </div>
+        </div>
+      )}
+
       {/* Mobile Tactical Helper Bar */}
       <div className="absolute bottom-28 left-4 z-10 md:hidden flex gap-2">
         <button
@@ -419,6 +550,15 @@ export default function AetheriaApp() {
 
       {/* Ancient Grimoire & Codex Modal */}
       <CodexModal isOpen={isCodexOpen} onClose={() => setIsCodexOpen(false)} />
+
+      {/* Hotkeys Reference Panel */}
+      <HotkeysPanel isOpen={isHotkeysOpen} onClose={() => setIsHotkeysOpen(false)} />
+
+      {/* Achievement toasts */}
+      <AchievementToast
+        queue={achievementQueue}
+        onDismiss={(id) => setAchievementQueue((q) => q.filter((a) => a.id !== id))}
+      />
 
       {/* Level Architect Workshop Modal */}
       {game && (
@@ -444,7 +584,7 @@ export default function AetheriaApp() {
               slot.mapData.depth,
               slot.mapData.spawns,
               slot.mapData.heartCore,
-              slot.mapData.biome
+              slot.mapData.biome,
             );
             rendererRef.current?.updateTowers(slot.placedTowers, slot.mapData.tiles);
             showNotification('已成功恢复古卷档案！');
@@ -462,8 +602,14 @@ export default function AetheriaApp() {
           stats={game.stats}
           relics={game.unlockedRelics}
           onRestart={handleRestart}
+          onReturnToMenu={handleReturnToMenu}
         />
       )}
     </div>
   );
+}
+
+/** Tiny helper so the hotkey-hint can fade when a wave is in progress. */
+function isWaveInProgressActive(g: GameState): boolean {
+  return g.isWaveInProgress;
 }

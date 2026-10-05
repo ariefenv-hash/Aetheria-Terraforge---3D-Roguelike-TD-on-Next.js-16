@@ -1,5 +1,5 @@
 import React from 'react';
-import { BookOpen, FastForward, MapPin, Pause, Play, RotateCcw, Save, Volume2, VolumeX, Eye } from 'lucide-react';
+import { BookOpen, FastForward, MapPin, Pause, Play, RotateCcw, Save, Volume2, VolumeX, Eye, Home, Keyboard } from 'lucide-react';
 import { Resources, WeatherType } from '@/types/game';
 import { WEATHER_CONFIGS } from '@/game/gameData';
 import { soundManager } from '@/audio/soundManager';
@@ -24,6 +24,7 @@ interface HeaderBarProps {
   onOpenSaves: () => void;
   onToggleMute: () => void;
   onResetCamera: () => void;
+  onReturnToMenu?: () => void;
 }
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({
@@ -46,6 +47,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onOpenSaves,
   onToggleMute,
   onResetCamera,
+  onReturnToMenu,
 }) => {
   const weatherCfg = WEATHER_CONFIGS[currentWeather];
   const nextWeatherCfg = WEATHER_CONFIGS[nextWeather];
@@ -237,6 +239,20 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             >
               {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
             </button>
+            {onReturnToMenu && (
+              <button
+                onClick={() => {
+                  soundManager.playClick();
+                  if (confirm('返回主菜单将放弃当前征程，确定吗？')) {
+                    onReturnToMenu();
+                  }
+                }}
+                className="p-1.5 rounded hover:bg-[#443422] text-[#e0cfb3] hover:text-[#ffd700] transition-colors"
+                title="返回主菜单 (返回选择领地与考验)"
+              >
+                <Home size={16} />
+              </button>
+            )}
           </div>
         </div>
       </div>

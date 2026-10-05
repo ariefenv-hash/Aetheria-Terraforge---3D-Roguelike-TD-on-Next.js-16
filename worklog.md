@@ -41,3 +41,67 @@ Stage Summary:
 - 3D WebGL 渲染、游戏循环、塔防战斗、Roguelike 三选一、模态框系统全部功能验证通过
 - 输出产物：可在浏览器预览的 Next.js 项目 (位于 `/home/z/my-project/`)
 - 截图证据：`/home/z/my-project/download/aetheria-{initial,wave1,click,tower,codex,saves,editor3,codex2,game,verify-final}.png`
+
+---
+Task ID: 2
+Agent: main (Super Z)
+Task: 进一步优化操作体验与耐玩性
+
+Work Log:
+- 新增类型层扩展：`Difficulty`、`RunConfig`、`Achievement`、`PlayerProfile` (`src/types/game.ts`)
+- 新增持久化战绩系统：`src/game/profileManager.ts` (localStorage + 8 项成就自动检测与解锁)
+- 新增 `DIFFICULTY_CONFIG` 三档难度调参 (学徒/术师/大法师) 在 `gameState.ts`，影响：
+  * 地脉核心 HP (×1.4 / ×1.0 / ×0.75)
+  * 敌人 HP scaling (×0.85 / ×1.0 / ×1.25)
+  * 敌人对核心伤害 (×0.7 / ×1.0 / ×1.35)
+  * 起始资源加成 (+60 / 0 / -30 原石 等)
+- 在 `GameState` 构造函数中接入 difficulty + endlessMode 参数；`finishWave` 支持 20 波后无尽模式继续运行
+- 扩展秘宝池从 14 → 19 项 (新增 5 个 Relic: 霜焰共生、超频符文、以太回旋机、晶体增幅、plus原有)
+- 操作体验升级：
+  * **Shift + 点击连建**：`onTileClick` 现接收 `shiftHeld` 参数，按住 Shift 时保持选中继续建造
+  * **右键取消**：在 `threeRenderer.ts` 注册 `contextmenu` 阻止原生菜单，外层 div 的 `onContextMenu` 取消当前选中
+  * **H 键打开快捷键面板** (`HotkeysPanel.tsx` — 列出 16 个快捷键)
+  * **窗口失焦自动暂停**：监听 `window.blur`，波次中自动 `isPaused=true`
+  * **Esc 取消 + 关闭面板**
+  * **TileInspector 增强**：新增 DPS、射速显示、升级进度条
+  * **右下角"按 H 查看快捷键"提示**（仅静止状态显示）
+  * **HeaderBar 新增 Home 按钮**返回主菜单（带确认弹窗）
+- 新增 `StartMenu.tsx` (220+ 行)：
+  * 四个生物群落卡片选择 (苍峦雪境/炽焰熔境/幽雾沼泽/晶界深渊)
+  * 三档难度选择卡片
+  * 无尽模式切换
+  * 战绩面板 (胜场/最高波/屠魔首领/总分)
+  * 8 项成就列表 (展开/折叠)
+  * 玩法说明 Modal
+  * 查阅图鉴按钮 (复用现有 CodexModal)
+  * "开启征程" 主按钮 + 快捷键提示
+- 新增 `AchievementToast.tsx`：右下角弹窗式成就解锁通知，5 秒自动消失
+- `GameOverModal` 增强：
+  * 显示本次征程新解锁的成就
+  * "返回主菜单"按钮
+- `AetheriaApp.tsx` 重构为两阶段：`'menu'` (StartMenu) → `'playing'` (游戏)
+  * phase state 控制，gameStateRef 在 phase='playing' 时初始化
+  * 游戏结束时调用 `profileManager.recordRun()` 持久化战绩 + 触发新成就 toast
+  * handleReturnToMenu / handleRestart 完整流程
+
+Agent Browser 验证 (全部通过)：
+- ✓ 启动菜单正确显示，可选择生物群落 + 难度 + 无尽模式
+- ✓ 大法师难度生效 (75/75 HP vs 100/100 默认)
+- ✓ H 键呼出快捷键面板
+- ✓ Shift+点击连建弩炮成功
+- ✓ 右键取消塔选中
+- ✓ Esc 取消选中 (DOM 验证 ring-2 类移除)
+- ✓ 窗口失焦自动暂停通知显示
+- ✓ 开始波次→敌人出现→波次结束→秘宝三选一
+- ✓ 大法师难度第一波即败北 → GameOverModal 显示
+- ✓ "本次征程解锁的成就 (1): 🗡️ 初阵告捷" 在 GameOver 弹窗显示
+- ✓ "返回主菜单"按钮工作 → StartMenu 重新显示
+- ✓ localStorage 持久化：totalGamesPlayed=1, highestWaveEver=1, unlockedAchievements=["first_blood"]
+- ✓ StartMenu "成就 1/8" 计数已更新
+
+Stage Summary:
+- 操作体验：5 项新交互 (Shift 连建/右键取消/H 快捷键/失焦暂停/Esc)
+- 耐玩性：3 档难度 + 无尽模式 + 8 项成就 + 持久化战绩 + 5 个新秘宝
+- 新增 4 个组件文件、1 个管理器文件；修改 5 个核心组件
+- Lint 0 errors，dev server 0 runtime errors
+- 截图证据：`/home/z/my-project/download/aetheria-{startmenu,hotkeys,shift-build,rightclick-cancel2,escape-cancel,autopause,back-to-menu,defeat-final,career-updated}.png`

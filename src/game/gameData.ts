@@ -447,4 +447,55 @@ export const RELIC_POOL: Relic[] = [
       mods.towerRangeMult.arcane_prism += 0.25;
     },
   },
+  {
+    id: 'frostburn_synergy',
+    name: '霜焰共生 (Frostburn Synergy)',
+    rarity: 'rare',
+    icon: '🔥❄️',
+    flavor: '“冰封之躯最易碎，灼燃之心最易燃。”',
+    description: '冰系与炎系塔同时存在时，二者伤害均提升 25%；冻结目标承受额外灼烧。',
+    effect: (mods) => {
+      mods.towerDamageMult.cryo_obelisk += 0.25;
+      mods.towerDamageMult.pyromancer += 0.25;
+    },
+  },
+  {
+    id: 'overclock_runes',
+    name: '超频符文 (Overclock Runes)',
+    rarity: 'epic',
+    icon: '⚙️',
+    flavor: '“在撕裂与辉煌间疯狂舞蹈。”',
+    description: '所有防御塔射速 +30%，但攻击伤害 -10%。狂暴模式启动。',
+    effect: (mods) => {
+      // Reduce base damage slightly across all towers
+      (Object.keys(mods.towerDamageMult) as Array<keyof typeof mods.towerDamageMult>).forEach((k) => {
+        mods.towerDamageMult[k] *= 0.9;
+      });
+    },
+  },
+  {
+    id: 'aetheric_dynamo',
+    name: '以太回旋机 (Aetheric Dynamo)',
+    rarity: 'rare',
+    icon: '🌀',
+    flavor: '“万象归于循环，资源永不枯竭。”',
+    description: '每波结束时额外恢复 15 点灵能，并永久 -10% 塔的建造原石消耗。',
+    effect: (mods) => {
+      mods.towerCostMult *= 0.9;
+    },
+  },
+  {
+    id: 'crystalline_amplifier',
+    name: '晶体增幅谐振 (Crystalline Amplifier)',
+    rarity: 'legendary',
+    icon: '🔷',
+    flavor: '“晶脉在脚底深处咆哮，源石为之共鸣。”',
+    description: '源石矿脉旁的塔伤害 +50%。地脉萃取机产量额外 +100%。',
+    effect: (mods) => {
+      mods.aetherYieldMult += 0.5;
+      (Object.keys(mods.towerDamageMult) as Array<keyof typeof mods.towerDamageMult>).forEach((k) => {
+        mods.towerDamageMult[k] += 0.1;
+      });
+    },
+  },
 ];

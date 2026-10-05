@@ -234,6 +234,36 @@ export interface SaveGameSlot {
   gameModifiers: GameModifiers;
 }
 
+export type Difficulty = 'novice' | 'adept' | 'archmage';
+
+export interface RunConfig {
+  biome: 'alpine' | 'volcano' | 'marsh' | 'crystal_abyss';
+  difficulty: Difficulty;
+  endlessMode: boolean;
+}
+
+export interface Achievement {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  /** Returns true if this achievement is unlocked given the cumulative profile. */
+  isUnlocked: (profile: PlayerProfile) => boolean;
+}
+
+export interface PlayerProfile {
+  totalGamesPlayed: number;
+  totalVictories: number;
+  highestWaveEver: number;
+  bossesSlainTotal: number;
+  tilesTerraformedTotal: number;
+  towersBuiltTotal: number;
+  totalScore: number;
+  unlockedAchievements: string[];
+  /** Track which biome+difficulty combos have been completed. */
+  completedRuns: string[];
+}
+
 export interface GameStats {
   enemiesDefeated: number;
   damageDealt: number;

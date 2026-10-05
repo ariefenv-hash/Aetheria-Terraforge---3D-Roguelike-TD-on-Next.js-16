@@ -49,7 +49,7 @@ export class ThreeRenderer {
   private touchStartDist = 0;
 
   // Event callbacks
-  public onTileClick?: (x: number, z: number) => void;
+  public onTileClick?: (x: number, z: number, shiftHeld: boolean) => void;
   public onTileHover?: (tile: GridTile | null) => void;
 
   private currentGridWidth = 16;
@@ -159,6 +159,9 @@ export class ThreeRenderer {
   private setupControls() {
     const dom = this.renderer.domElement;
 
+    // Prevent native context menu so right-click can be used for cancel
+    dom.addEventListener('contextmenu', (e) => e.preventDefault());
+
     // Mouse move for raycasting & camera orbit
     dom.addEventListener('pointerdown', (e) => {
       this.lastMousePos = { x: e.clientX, y: e.clientY };
@@ -199,7 +202,7 @@ export class ThreeRenderer {
       if (this.isDragging && Math.abs(e.clientX - this.lastMousePos.x) < 3 && Math.abs(e.clientY - this.lastMousePos.y) < 3) {
         // Simple click without substantial drag
         if (this.hoveredTile && this.onTileClick) {
-          this.onTileClick(this.hoveredTile.x, this.hoveredTile.z);
+          this.onTileClick(this.hoveredTile.x, this.hoveredTile.z, e.shiftKey);
         }
       }
       this.isDragging = false;

@@ -131,10 +131,39 @@ export const TileInspector: React.FC<TileInspectorProps> = ({
                   </span>
                 </div>
                 <div>
+                  DPS:{' '}
+                  <span className="font-mono-code text-[#ff9f1c]">
+                    {towerCfg.fireRate > 0 ? Math.round(towerCfg.damage * tower.level * towerCfg.fireRate) : 0}
+                  </span>
+                </div>
+                <div>
+                  射速:{' '}
+                  <span className="font-mono-code text-[#90c890]">
+                    {towerCfg.fireRate > 0 ? `${towerCfg.fireRate.toFixed(1)}/s` : '—'}
+                  </span>
+                </div>
+                <div>
                   歼敌: <span className="font-mono-code text-[#f28482]">{tower.totalKills}</span>
                 </div>
                 <div>
                   总伤: <span className="font-mono-code text-[#f28482]">{Math.round(tower.totalDamageDealt)}</span>
+                </div>
+              </div>
+
+              {/* Upgrade progress bar showing relative power gain */}
+              <div className="mt-1">
+                <div className="flex items-center justify-between text-[10px] text-[#a89070] mb-0.5">
+                  <span>升级进度</span>
+                  <span className="font-mono-code text-[#ffd700]">Lv.{tower.level} → Lv.{tower.level + 1}</span>
+                </div>
+                <div className="h-1.5 rounded bg-[#17110c] border border-[#3d3022] overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-[#a3824f] to-[#ffd700] transition-all"
+                    style={{ width: `${Math.min(100, tower.level * 12.5)}%` }}
+                  />
+                </div>
+                <div className="text-[10px] text-[#7c6241] mt-0.5">
+                  下级伤害提升: +{Math.round(towerCfg.damage * 0.45)} (+45%)
                 </div>
               </div>
 

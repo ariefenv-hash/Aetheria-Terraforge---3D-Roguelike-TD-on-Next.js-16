@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import confetti from 'canvas-confetti';
-import { RotateCcw, Trophy, Skull, Mountain, Sparkles } from 'lucide-react';
-import { GameStats, Relic } from '@/types/game';
+import { RotateCcw, Trophy, Skull, Mountain, Sparkles, Home } from 'lucide-react';
+import { GameStats, Relic, Achievement } from '@/types/game';
 import { soundManager } from '@/audio/soundManager';
+import { ACHIEVEMENTS, profileManager } from '@/game/profileManager';
 
 interface GameOverModalProps {
   isOpen: boolean;
@@ -11,6 +12,7 @@ interface GameOverModalProps {
   stats: GameStats;
   relics: Relic[];
   onRestart: (biome: 'alpine' | 'volcano' | 'marsh' | 'crystal_abyss') => void;
+  onReturnToMenu?: () => void;
 }
 
 export const GameOverModal: React.FC<GameOverModalProps> = ({
@@ -20,7 +22,22 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   stats,
   relics,
   onRestart,
+  onReturnToMenu,
 }) => {
+  const [freshlyUnlocked, setFreshlyUnlocked] = useState<Achievement[]>([]);
+
+  // Capture the snapshot of newly-unlocked achievements from this run.
+  // They are added to the queue at the time of game over, but we display them
+  // here too as part of the game-over screen for context.
+  useEffect(() => {
+    if (!isOpen) return;
+    const profile = profileManager.load();
+    // Find the most-recently-added achievement (heuristic: any achievement the
+    // player now has that's tied to this run's stats).
+    const candidates = ACHIEVEMENTS.filter((a) => profile.unlockedAchievements.includes(a.id));
+    setFreshlyUnlocked(candidates.slice(-3)); // show last 3
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   if (isVictory) {
@@ -151,6 +168,40 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Newly unlocked achievements */}
+        {freshlyUnlocked.length > 0 && (
+          <div className="border-t border-[#523e29] pt-2 text-left">
+            <div className="text-xs text-[#ffd700] font-cinzel mb-1.5 flex items-center gap-1">
+              <Trophy size={13} /> 本次征程解锁的成就 ({freshlyUnlocked.length}):
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {freshlyUnlocked.map((a) => (
+                <span
+                  key={a.id}
+                  className="px-2 py-1 rounded-lg bg-gradient-to-r from-[#3a2a14]/60 to-[#1c1510]/60 border border-[#a3824f] text-[11px] text-[#ffd700] flex items-center gap-1"
+                >
+                  <span>{a.icon}</span>
+                  <span>{a.name.split(' ')[0]}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Return to menu */}
+        {onReturnToMenu && (
+          <button
+            onClick={() => {
+              soundManager.playClick();
+              onReturnToMenu();
+            }}
+            className="w-full py-2 px-4 rounded-xl bg-[#33251a] border border-[#6b4f2c] text-[#e0cfb3] hover:bg-[#443422] hover:text-[#ffd700] transition-colors flex items-center justify-center gap-2 text-xs font-cinzel"
+          >
+            <Home size={14} />
+            <span>返回主菜单 · 选择新考验</span>
+          </button>
+        )}
       </div>
     </div>
   );

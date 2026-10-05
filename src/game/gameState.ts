@@ -1,6 +1,7 @@
 import { soundManager } from '@/audio/soundManager';
 import {
   ActiveEnemy,
+  Difficulty,
   EnemyConfig,
   GameModifiers,
   GameStats,
@@ -21,6 +22,52 @@ import { ENEMY_CONFIGS, RELIC_POOL, TOWER_CONFIGS, WEATHER_CONFIGS } from './gam
 import { findPath } from './pathfinding';
 import { generateProceduralMap } from './proceduralMap';
 
+/** Per-difficulty tuning knobs. */
+export const DIFFICULTY_CONFIG: Record<
+  Difficulty,
+  {
+    label: string;
+    heartHealthMult: number;
+    enemyHpMult: number;
+    enemyDamageMult: number;
+    aetherBonus: number;
+    manaBonus: number;
+    sparksBonus: number;
+    description: string;
+  }
+> = {
+  novice: {
+    label: '学徒 (Novice)',
+    heartHealthMult: 1.4,
+    enemyHpMult: 0.85,
+    enemyDamageMult: 0.7,
+    aetherBonus: 60,
+    manaBonus: 30,
+    sparksBonus: 3,
+    description: '更厚的地脉核心、更弱的魔物。适合熟悉机制。',
+  },
+  adept: {
+    label: '术师 (Adept)',
+    heartHealthMult: 1.0,
+    enemyHpMult: 1.0,
+    enemyDamageMult: 1.0,
+    aetherBonus: 0,
+    manaBonus: 0,
+    sparksBonus: 0,
+    description: '标准挑战，资源平衡，需要周密布阵。',
+  },
+  archmage: {
+    label: '大法师 (Archmage)',
+    heartHealthMult: 0.75,
+    enemyHpMult: 1.25,
+    enemyDamageMult: 1.35,
+    aetherBonus: -30,
+    manaBonus: -10,
+    sparksBonus: -1,
+    description: '极度考验：核心脆弱、魔物凶猛、资源紧张。',
+  },
+};
+
 export interface GameEvents {
   onWaveComplete: (wave: number) => void;
   onGameOver: (victory: boolean) => void;
@@ -35,6 +82,10 @@ export class GameState {
   public maxHeartHealth: number = 100;
   public currentWave: number = 0;
   public totalWaves: number = 20;
+  public difficulty: Difficulty = 'adept';
+  public endlessMode: boolean = false;
+  /** Set true once the standard 20-wave victory has been achieved. */
+  public hasWonStandardRun: boolean = false;
 
   public placedTowers: PlacedTower[] = [];
   public activeEnemies: ActiveEnemy[] = [];
@@ -62,13 +113,21 @@ export class GameState {
   // Event callbacks
   public events?: GameEvents;
 
-  constructor(customMap?: MapData) {
+  constructor(customMap?: MapData, difficulty: Difficulty = 'adept', endlessMode = false) {
     this.mapData = customMap || generateProceduralMap('alpine');
+    this.difficulty = difficulty;
+    this.endlessMode = endlessMode;
+    this.totalWaves = endlessMode ? 999 : 20;
+
+    const diffCfg = DIFFICULTY_CONFIG[difficulty];
+    this.maxHeartHealth = Math.round(100 * diffCfg.heartHealthMult);
+    this.heartHealth = this.maxHeartHealth;
+
     this.resources = {
-      aether: this.mapData.initialAether,
-      mana: this.mapData.initialMana,
+      aether: Math.max(0, this.mapData.initialAether + diffCfg.aetherBonus),
+      mana: Math.max(0, this.mapData.initialMana + diffCfg.manaBonus),
       souls: 0,
-      sparks: this.mapData.initialSparks,
+      sparks: Math.max(0, this.mapData.initialSparks + diffCfg.sparksBonus),
     };
 
     this.gameModifiers = this.createDefaultModifiers();
@@ -83,6 +142,16 @@ export class GameState {
     };
 
     this.forecastNextWeather();
+  }
+
+  /** Difficulty multiplier applied to enemy HP scaling. */
+  private get enemyHpMult() {
+    return DIFFICULTY_CONFIG[this.difficulty].enemyHpMult;
+  }
+
+  /** Difficulty multiplier applied to enemy damage (heart core hits). */
+  private get enemyDmgMult() {
+    return DIFFICULTY_CONFIG[this.difficulty].enemyDamageMult;
   }
 
   private createDefaultModifiers(): GameModifiers {
@@ -507,8 +576,8 @@ export class GameState {
       cfg.isFlying
     );
 
-    // Wave health scaling (+12% per wave)
-    const waveScaling = 1 + (this.currentWave - 1) * 0.12;
+    // Wave health scaling (+12% per wave) + difficulty multiplier
+    const waveScaling = (1 + (this.currentWave - 1) * 0.12) * this.enemyHpMult;
     const maxHp = Math.round(cfg.maxHealth * waveScaling);
 
     const spawnTile = this.getTile(spawnPoint.x, spawnPoint.z);
@@ -618,7 +687,8 @@ export class GameState {
       );
 
       if (distToCore < 0.6) {
-        const damage = enemy.type === 'colossus_boss' || enemy.type === 'storm_wyrm' ? 35 : 10;
+        const baseDmg = enemy.type === 'colossus_boss' || enemy.type === 'storm_wyrm' ? 35 : 10;
+        const damage = Math.max(1, Math.round(baseDmg * this.enemyDmgMult));
         this.heartHealth = Math.max(0, this.heartHealth - damage);
         soundManager.playCoreAlarm();
         this.activeEnemies.splice(i, 1);
@@ -839,11 +909,16 @@ export class GameState {
   private finishWave() {
     this.isWaveInProgress = false;
 
-    // Reward
-    this.resources.aether += 50 + this.currentWave * 15;
-    this.resources.mana += 25 + this.currentWave * 5;
+    // Reward (slightly more generous in endless mode to keep momentum)
+    const waveRewardMult = this.endlessMode ? 1.4 : 1.0;
+    this.resources.aether += Math.round((50 + this.currentWave * 15) * waveRewardMult);
+    this.resources.mana += Math.round((25 + this.currentWave * 5) * waveRewardMult);
 
-    if (this.currentWave >= this.totalWaves) {
+    // Endless mode scaling: after wave 20, enemies continue scaling up
+    if (this.endlessMode) {
+      // Endless has no permanent "victory" — only endless survival
+    } else if (this.currentWave >= this.totalWaves) {
+      this.hasWonStandardRun = true;
       this.handleGameOver(true);
       return;
     }

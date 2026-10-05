@@ -1,0 +1,6 @@
+{
+  "name": "Aetheria: Terraforge 3D Roguelike TD",
+  "description": "融合3D地形重塑、多维资源管理与动态天气系统的Roguelike塔防游戏。复古文艺手稿UI、自制关卡编辑器与深度策略构筑。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

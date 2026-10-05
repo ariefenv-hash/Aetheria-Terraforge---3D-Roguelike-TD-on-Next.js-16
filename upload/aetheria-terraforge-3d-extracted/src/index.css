@@ -1,0 +1,103 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Crimson Pro', Georgia, serif;
+    background-color: #0d0b09;
+    color: #ebdcb9;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  h1, h2, h3, h4, .font-cinzel {
+    font-family: 'Cinzel', serif;
+    letter-spacing: 0.05em;
+  }
+
+  .font-decorative {
+    font-family: 'Cinzel Decorative', cursive;
+  }
+
+  .font-script {
+    font-family: 'MedievalSharp', cursive;
+  }
+
+  .font-mono-code {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+/* Retro Literary Parchment & Brass aesthetic */
+.parchment-panel {
+  background: radial-gradient(circle at 50% 30%, #2a2219 0%, #1a1510 80%, #120e0a 100%);
+  border: 1px solid #7c6241;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7), inset 0 0 15px rgba(184, 138, 68, 0.15);
+}
+
+.parchment-card {
+  background: linear-gradient(135deg, rgba(42, 34, 25, 0.95) 0%, rgba(26, 21, 16, 0.98) 100%);
+  border: 1px solid #634f35;
+  box-shadow: inset 0 0 12px rgba(212, 163, 89, 0.12), 0 4px 16px rgba(0, 0, 0, 0.6);
+}
+
+.parchment-light {
+  background: #f4ebd9;
+  color: #2b1f13;
+  box-shadow: inset 0 0 30px rgba(139, 94, 43, 0.25), 0 8px 24px rgba(0,0,0,0.6);
+}
+
+.brass-border {
+  border: 1px solid #997843;
+  box-shadow: 0 0 8px rgba(184, 138, 68, 0.3);
+}
+
+.brass-button {
+  background: linear-gradient(180deg, #443422 0%, #271d13 100%);
+  border: 1px solid #a3824f;
+  color: #f7e7c4;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  box-shadow: inset 0 1px 0 rgba(255, 235, 178, 0.2), 0 3px 6px rgba(0,0,0,0.5);
+  transition: all 0.15s ease-out;
+}
+
+.brass-button:hover:not(:disabled) {
+  background: linear-gradient(180deg, #57432c 0%, #36291a 100%);
+  border-color: #d6af68;
+  color: #fff4d6;
+  box-shadow: inset 0 1px 0 rgba(255, 235, 178, 0.35), 0 0 12px rgba(214, 175, 104, 0.4);
+  transform: translateY(-1px);
+}
+
+.brass-button:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.6);
+}
+
+.brass-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(60%);
+}
+
+.wax-seal {
+  background: radial-gradient(circle at 35% 35%, #962828 0%, #681717 70%, #3e0b0b 100%);
+  border: 2px solid #b83a3a;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.7), inset 0 1px 3px rgba(255,180,180,0.4);
+}
+
+/* Custom Scrollbar for parchment lists */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #191410;
+}
+::-webkit-scrollbar-thumb {
+  background: #644f33;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #997843;
+}
+

@@ -170,3 +170,32 @@ Stage Summary:
 - GitHub 仓库已同步最新代码
 - Token 在脚本中已 unset，未持久化到任何配置
 - 用户需手动撤销: Cloudflare + GitHub 两个 Token
+
+---
+Task ID: 5
+Agent: main (Super Z)
+Task: 部署到 GitHub Pages 作为国内备用镜像
+
+Work Log:
+- 创建 gh-pages orphan branch, clean repo
+- 静态构建 Next.js (output: export) → 2.1MB, 52 个文件
+- 添加 .nojekyll 防止 GitHub Pages 跳过 _next 目录
+- 添加 _headers 和 _redirects（Cloudflare Pages 兼容文件）
+- 第一次推送 gh-pages → GitHub Pages 自动启用 legacy 部署模式
+- 测试发现 asset 路径错误：script src="/_next/..." 但应为 "/repo-name/_next/..."
+- 修复 next.config.ts：添加 GITHUB_PAGES_BASE 环境变量支持 basePath/assetPrefix
+- 重新构建 + 重新推送 gh-pages → Pages 重新构建成功
+- Agent Browser 实测：3D Canvas + StartMenu 完整渲染
+- 添加 GitHub Actions workflow (`.github/workflows/deploy.yml`)
+- 用户需手动在 Settings → Pages → Source 切换到 "GitHub Actions" 启用自动部署
+- 当前 legacy 模式仍可用：手动 push 到 gh-pages 分支即自动部署
+- 推送所有变更到 main 分支
+
+Stage Summary:
+- GitHub Pages URL: https://ariefenv-hash.github.io/Aetheria-Terraforge---3D-Roguelike-TD-on-Next.js-16/ ✓
+- 部署模式: legacy (gh-pages branch auto-deploy)
+- 启动页 download/aetheria-launch.html 已加入"国内镜像"按钮指向 GitHub Pages
+- 三个部署 URL 全部可用：
+  1. Cloudflare Pages (主): https://aetheria-terraforge.pages.dev
+  2. GitHub Pages (国内备): https://ariefenv-hash.github.io/Aetheria-Terraforge---3D-Roguelike-TD-on-Next.js-16/
+  3. Vercel (海外备): https://aetheria-terraforge.vercel.app

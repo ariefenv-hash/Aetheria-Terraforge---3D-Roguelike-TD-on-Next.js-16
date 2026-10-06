@@ -138,3 +138,35 @@ Stage Summary:
 - 部署 alias: https://aetheria-terraforge.vercel.app (主域名)
 - 部署详情: https://aetheria-terraforge-d6p89syvm-ariefenv-hash.vercel.app
 - 项目已在 Vercel Dashboard 可见，后续 git push 到 main 分支会自动触发 Vercel 重新部署
+
+---
+Task ID: 4
+Agent: main (Super Z)
+Task: 部署到 Cloudflare Pages 解决国内访问问题
+
+Work Log:
+- 用户反馈 Vercel 部署在国内无法访问（连接被重置，非字体问题）
+- 验证 Vercel 在沙箱可达，但确认 *.vercel.app 在中国大陆被墙
+- 测试 Cloudflare Pages / Workers 在沙箱可达，确认其为最佳国内可用替代
+- 用户提供 Cloudflare API Token
+- Token 验证通过，account ID: ac59bbe71076aa00b56b92ab60f3ff10
+- 安装 wrangler@4.147.0 (bun add -g wrangler)
+- 创建 Cloudflare Pages 项目 `aetheria-terraforge` (subdomain: aetheria-terraforge.pages.dev)
+- 调整 next.config.ts: output: "standalone" → output: "export"（静态导出，因为游戏纯客户端无 SSR）
+- 备份 src/app/api/route.ts（仅 hello world，不影响游戏）
+- bunx next build → 静态导出到 out/ (2.1 MB, 52 个文件)
+- 添加 out/_headers（安全头 + 长缓存）和 out/_redirects（SPA fallback）
+- 部署到 Cloudflare Pages：成功，URL: https://12f9d2f0.aetheria-terraforge.pages.dev
+- 等待 30 秒后验证主域名 https://aetheria-terraforge.pages.dev 返回 HTTP 200 + 完整 HTML
+- Agent Browser 实测：3D Canvas + StartMenu 完整渲染
+- 恢复 src/app/api/route.ts（Vercel 兼容性）
+- 更新启动页 download/aetheria-launch.html：所有 URL 改为 .pages.dev
+- 推送 next.config.ts 变更到 GitHub: 87f73ba..bb4a8e3
+
+Stage Summary:
+- Cloudflare Pages 主域名: https://aetheria-terraforge.pages.dev ✓
+- 部署 URL (具体版本): https://12f9d2f0.aetheria-terraforge.pages.dev
+- 启动页 (本地自用): download/aetheria-launch.html 已更新到新 URL
+- GitHub 仓库已同步最新代码
+- Token 在脚本中已 unset，未持久化到任何配置
+- 用户需手动撤销: Cloudflare + GitHub 两个 Token

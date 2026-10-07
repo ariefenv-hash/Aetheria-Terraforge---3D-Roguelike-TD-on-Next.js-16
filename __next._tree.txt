@@ -1,9 +1,9 @@
 :HL["/Aetheria-Terraforge---3D-Roguelike-TD-on-Next.js-16/_next/static/chunks/9a2aa1451c294f25.css","style"]
-:HL["/Aetheria-Terraforge---3D-Roguelike-TD-on-Next.js-16/_next/static/chunks/83c3a2f966de9bfb.css","style"]
+:HL["/Aetheria-Terraforge---3D-Roguelike-TD-on-Next.js-16/_next/static/chunks/a842b359889b07fc.css","style"]
 :HL["/Aetheria-Terraforge---3D-Roguelike-TD-on-Next.js-16/_next/static/media/051742360c26797e-s.p.102b7f24.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
 :HL["/Aetheria-Terraforge---3D-Roguelike-TD-on-Next.js-16/_next/static/media/115e7a2565b70400-s.p.e440a306.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
 :HL["/Aetheria-Terraforge---3D-Roguelike-TD-on-Next.js-16/_next/static/media/a41eab1df8ed80c4-s.p.c12a81de.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
 :HL["/Aetheria-Terraforge---3D-Roguelike-TD-on-Next.js-16/_next/static/media/adf646fda1364368-s.p.c05cb109.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
 :HL["/Aetheria-Terraforge---3D-Roguelike-TD-on-Next.js-16/_next/static/media/cc014fcb166cf364-s.p.e32417d2.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
 :HL["/Aetheria-Terraforge---3D-Roguelike-TD-on-Next.js-16/_next/static/media/ea1df765ed99ddf9-s.p.fa736f52.woff2","font",{"crossOrigin":"","type":"font/woff2"}]
-0:{"buildId":"n9RhWVnEeQUsyvZh3Gfvn","tree":{"name":"","paramType":null,"paramKey":"","hasRuntimePrefetch":false,"slots":{"children":{"name":"__PAGE__","paramType":null,"paramKey":"__PAGE__","hasRuntimePrefetch":false,"slots":null,"isRootLayout":false}},"isRootLayout":true},"staleTime":300}
+0:{"buildId":"2sZDkx8dfamdVlNBMzKsE","tree":{"name":"","paramType":null,"paramKey":"","hasRuntimePrefetch":false,"slots":{"children":{"name":"__PAGE__","paramType":null,"paramKey":"__PAGE__","hasRuntimePrefetch":false,"slots":null,"isRootLayout":false}},"isRootLayout":true},"staleTime":300}

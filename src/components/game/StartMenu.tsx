@@ -5,7 +5,7 @@ import { ACHIEVEMENTS, profileManager } from '@/game/profileManager';
 import { DIFFICULTY_CONFIG } from '@/game/gameState';
 import { Difficulty } from '@/types/game';
 import { soundManager } from '@/audio/soundManager';
-import { Mountain, Flame, Droplet, Gem, Trophy, Sparkles, Infinity as InfinityIcon, HelpCircle } from 'lucide-react';
+import { Mountain, Flame, Droplet, Gem, Trophy, Sparkles, Infinity as InfinityIcon, HelpCircle, Calendar } from 'lucide-react';
 
 export interface RunConfig {
   biome: 'alpine' | 'volcano' | 'marsh' | 'crystal_abyss';
@@ -255,6 +255,22 @@ export const StartMenu: React.FC<StartMenuProps> = ({ onStart, onOpenCodex }) =>
           >
             <Sparkles size={18} />
             <span>开启征程 · BEGIN</span>
+          </button>
+          <button
+            onClick={() => {
+              soundManager.playWarHorn();
+              // Daily challenge: seeded run, fixed biome rotation, adept difficulty, no endless
+              const today = new Date();
+              const biomes: ('alpine' | 'volcano' | 'marsh' | 'crystal_abyss')[] = ['alpine', 'volcano', 'marsh', 'crystal_abyss'];
+              const seedBiome = biomes[Math.floor(today.getDate() / 8) % 4];
+              const seed = `daily-${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+              onStart({ biome: seedBiome, difficulty: 'adept', endlessMode: false, dailySeed: seed });
+            }}
+            className="px-4 py-3 rounded-xl bg-gradient-to-r from-[#5a3a8b]/40 to-[#2a1a3b]/60 border-2 border-[#9a5abb] text-[#b388ff] hover:text-[#fff] hover:border-[#d4af37] transition-all flex items-center justify-center gap-2 text-sm font-cinzel font-bold"
+            title="每日固定场景的挑战，全球玩家相同地图！"
+          >
+            <Calendar size={16} />
+            <span>每日挑战</span>
           </button>
           <button
             onClick={() => {

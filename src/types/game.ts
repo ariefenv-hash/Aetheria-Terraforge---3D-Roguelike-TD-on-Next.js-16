@@ -66,6 +66,42 @@ export interface PlacedTower {
   totalKills: number;
   totalDamageDealt: number;
   customName?: string;
+  /** Specialization path chosen at level 3+. */
+  specialization?: TowerSpecialization;
+  /** Marks this tower as eligible for specialization pick on next upgrade. */
+  pendingSpecialization?: boolean;
+}
+
+export type TowerSpecialization =
+  | 'rapid_fire'   // +60% fire rate, -10% damage
+  | 'siege_master' // +80% damage, -30% fire rate, +20% splash
+  | 'overcharge'   // +50% range, +25% damage, drains 2x mana
+  | 'fortified'    // +100% elevation bonus, +15% damage when at height >= 2
+  | 'crystalline'  // +40% damage to enemies on crystal tiles, +25% mana efficiency
+  | 'frostfire'    // Burns + freezes simultaneously, +35% effect duration
+  | 'siege_breaker' // Armor-piercing +30% damage to bosses
+  | 'swarm_slayer'; // +50% damage to non-boss, +20% fire rate vs groups
+
+export interface MapEvent {
+  id: string;
+  type: 'meteor' | 'treasure_goblin' | 'blessing' | 'aether_rain' | 'frenzy';
+  name: string;
+  icon: string;
+  description: string;
+  /** Wave at which the event triggers (1-indexed). */
+  triggerWave: number;
+  /** At what point during the wave the event fires (0=start, 0.5=middle, 1=end). */
+  triggerProgress: number;
+  fired?: boolean;
+}
+
+export interface ComboState {
+  currentCombo: number;
+  comboTimer: number;     // seconds remaining
+  maxCombo: number;       // best combo achieved this run
+  comboMultiplier: number; // current damage/score multiplier (1.0 = no bonus)
+  totalKillsInCombo: number;
+  lastKillTime: number;   // game time at last kill
 }
 
 export type EnemyType =
@@ -240,6 +276,8 @@ export interface RunConfig {
   biome: 'alpine' | 'volcano' | 'marsh' | 'crystal_abyss';
   difficulty: Difficulty;
   endlessMode: boolean;
+  /** Optional deterministic seed for daily challenges. */
+  dailySeed?: string;
 }
 
 export interface Achievement {
@@ -272,4 +310,12 @@ export interface GameStats {
   soulsHarvested: number;
   highestWave: number;
   bossesSlain: number;
+  /** Best combo achieved in this run. */
+  bestCombo: number;
+  /** Total kills achieved with combo multiplier active. */
+  comboKills: number;
+  /** Number of map events triggered this run. */
+  eventsTriggered: number;
+  /** Total bonus resources from events. */
+  eventBonus: number;
 }

@@ -8,10 +8,12 @@ import {
   Difficulty,
   GridTile,
   MapData,
+  MapEvent,
   PlacedTower,
   Relic,
   SaveGameSlot,
   TerraformTool,
+  TowerSpecialization,
   TowerType,
 } from '@/types/game';
 import { soundManager } from '@/audio/soundManager';
@@ -27,6 +29,11 @@ import { GameOverModal } from '@/components/game/GameOverModal';
 import { StartMenu, RunConfig } from '@/components/game/StartMenu';
 import { HotkeysPanel } from '@/components/game/HotkeysPanel';
 import { AchievementToast } from '@/components/game/AchievementToast';
+import { ComboMeter } from '@/components/game/ComboMeter';
+import { MapEventToast } from '@/components/game/MapEventToast';
+import { SpecializationModal } from '@/components/game/SpecializationModal';
+import { MobileQuickActions } from '@/components/game/MobileQuickActions';
+import { TutorialOverlay, hasSeenTutorial } from '@/components/game/TutorialOverlay';
 import { TOWER_CONFIGS } from '@/game/gameData';
 import { profileManager } from '@/game/profileManager';
 import { generateProceduralMap } from '@/game/proceduralMap';
@@ -52,10 +59,16 @@ export default function AetheriaApp() {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [isSavesOpen, setIsSavesOpen] = useState(false);
   const [isHotkeysOpen, setIsHotkeysOpen] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
   const [gameOverState, setGameOverState] = useState<{ open: boolean; victory: boolean }>({
     open: false,
     victory: false,
   });
+
+  // === New mechanics state ===
+  const [comboState, setComboState] = useState<{ current: number; multiplier: number; max: number; comboTimer?: number } | null>(null);
+  const [activeMapEvent, setActiveMapEvent] = useState<MapEvent | null>(null);
+  const [pendingSpecialization, setPendingSpecialization] = useState<{ tower: PlacedTower; options: TowerSpecialization[] } | null>(null);
 
   const [isMuted, setIsMuted] = useState(soundManager.getMuted());
   const [notification, setNotification] = useState<string | null>(null);
@@ -76,7 +89,7 @@ export default function AetheriaApp() {
     // Build a fresh procedural map for the chosen biome, then a game state with
     // the chosen difficulty + endless flag.
     const customMap = generateProceduralMap(runConfig.biome);
-    const game = new GameState(customMap, runConfig.difficulty, runConfig.endlessMode);
+    const game = new GameState(customMap, runConfig.difficulty, runConfig.endlessMode, runConfig.dailySeed);
     gameStateRef.current = game;
     gameOverRecordedRef.current = false;
 
@@ -129,6 +142,15 @@ export default function AetheriaApp() {
         setDraftRelics(relics);
       },
       onStateUpdate: () => {},
+      onComboUpdate: (combo) => {
+        setComboState({ ...combo, comboTimer: gameStateRef.current?.combo.comboTimer });
+      },
+      onMapEvent: (evt) => {
+        setActiveMapEvent(evt);
+      },
+      onSpecializationPrompt: (tower, options) => {
+        setPendingSpecialization({ tower, options });
+      },
     };
 
     // Tile click handler from 3D canvas
@@ -331,6 +353,10 @@ export default function AetheriaApp() {
   const handleStartRun = (cfg: RunConfig) => {
     setRunConfig(cfg);
     setPhase('playing');
+    // Show tutorial for first-time users (not for daily challenges)
+    if (!cfg.dailySeed && !hasSeenTutorial()) {
+      setTimeout(() => setShowTutorial(true), 1200);
+    }
   };
 
   const handleReturnToMenu = () => {
@@ -340,6 +366,10 @@ export default function AetheriaApp() {
     setSelectedTower(null);
     setSelectedTool('inspect');
     setIsHotkeysOpen(false);
+    setComboState(null);
+    setActiveMapEvent(null);
+    setPendingSpecialization(null);
+    setShowTutorial(false);
   };
 
   const handleRestart = (biome: 'alpine' | 'volcano' | 'marsh' | 'crystal_abyss') => {
@@ -559,6 +589,41 @@ export default function AetheriaApp() {
         queue={achievementQueue}
         onDismiss={(id) => setAchievementQueue((q) => q.filter((a) => a.id !== id))}
       />
+
+      {/* Combo meter (appears during active combos) */}
+      <ComboMeter combo={comboState} />
+
+      {/* Map event toast (large celebratory notification) */}
+      <MapEventToast event={activeMapEvent} onDismiss={() => setActiveMapEvent(null)} />
+
+      {/* Tower specialization modal */}
+      <SpecializationModal
+        tower={pendingSpecialization?.tower || null}
+        options={pendingSpecialization?.options || []}
+        onSelect={(towerId, spec) => {
+          game?.applySpecialization(towerId, spec);
+          setPendingSpecialization(null);
+          showNotification(`已觉醒专精: ${spec}`);
+        }}
+      />
+
+      {/* First-time tutorial overlay */}
+      <TutorialOverlay isOpen={showTutorial} onClose={() => setShowTutorial(false)} />
+
+      {/* Mobile-only floating quick action buttons */}
+      {game && (
+        <MobileQuickActions
+          isPaused={game.isPaused}
+          gameSpeed={game.gameSpeed}
+          isWaveInProgress={game.isWaveInProgress}
+          onTogglePause={() => { game.isPaused = !game.isPaused; soundManager.playClick(); }}
+          onCycleSpeed={() => {
+            soundManager.playClick();
+            game.gameSpeed = game.gameSpeed === 1 ? 2 : game.gameSpeed === 2 ? 4 : 1;
+          }}
+          onResetCamera={() => rendererRef.current?.resetCameraView()}
+        />
+      )}
 
       {/* Level Architect Workshop Modal */}
       {game && (

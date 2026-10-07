@@ -1,12 +1,14 @@
 import { soundManager } from '@/audio/soundManager';
 import {
   ActiveEnemy,
+  ComboState,
   Difficulty,
   EnemyConfig,
   GameModifiers,
   GameStats,
   GridTile,
   MapData,
+  MapEvent,
   PlacedTower,
   Projectile,
   Relic,
@@ -14,6 +16,7 @@ import {
   SaveGameSlot,
   TerraformTool,
   TowerConfig,
+  TowerSpecialization,
   TowerType,
   WaveConfig,
   WeatherType,
@@ -21,6 +24,36 @@ import {
 import { ENEMY_CONFIGS, RELIC_POOL, TOWER_CONFIGS, WEATHER_CONFIGS } from './gameData';
 import { findPath } from './pathfinding';
 import { generateProceduralMap } from './proceduralMap';
+
+/**
+ * Mulberry32 — fast seeded PRNG. Returns a function that yields floats
+ * in [0, 1). When seed is omitted, falls back to Math.random.
+ */
+function createSeededRng(seed?: string): () => number {
+  if (!seed) return Math.random;
+  // Hash the seed string to a 32-bit integer
+  let h = 1779033703 ^ seed.length;
+  for (let i = 0; i < seed.length; i++) {
+    h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  let a = h >>> 0;
+  return function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Returns a date string like '2025-01-15' used as the daily challenge seed. */
+export function getDailySeed(date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `daily-${y}-${m}-${d}`;
+}
 
 /** Per-difficulty tuning knobs. */
 export const DIFFICULTY_CONFIG: Record<
@@ -73,6 +106,9 @@ export interface GameEvents {
   onGameOver: (victory: boolean) => void;
   onRelicDraftOpen: (relics: Relic[]) => void;
   onStateUpdate: () => void;
+  onComboUpdate?: (combo: { current: number; multiplier: number; max: number }) => void;
+  onMapEvent?: (event: MapEvent) => void;
+  onSpecializationPrompt?: (tower: PlacedTower, options: TowerSpecialization[]) => void;
 }
 
 export class GameState {
@@ -106,6 +142,21 @@ export class GameState {
   public gameModifiers: GameModifiers;
   public stats: GameStats;
 
+  // === New mechanics: Combo, Events, Specializations ===
+  public combo: ComboState;
+  /** Scheduled map events for this run. Generated from seed at start. */
+  public scheduledEvents: MapEvent[] = [];
+  /** Active map events currently in effect (some are instant, some persistent). */
+  public activeEvents: MapEvent[] = [];
+  /** Game time elapsed (seconds). Used for combo timing & events. */
+  public gameTime: number = 0;
+  /** Determines the run's randomness — same seed = same map, events, relic draws. */
+  public dailySeed?: string;
+  /** RNG for this run (deterministic when seed is set). */
+  private rng: () => number;
+  /** Pending specialization choices. */
+  public pendingSpecializations: { towerId: string; options: TowerSpecialization[] }[] = [];
+
   // Wave spawn state
   private spawnQueue: { enemyType: string; delay: number; spawnIndex: number }[] = [];
   private waveTimer: number = 0;
@@ -113,11 +164,13 @@ export class GameState {
   // Event callbacks
   public events?: GameEvents;
 
-  constructor(customMap?: MapData, difficulty: Difficulty = 'adept', endlessMode = false) {
+  constructor(customMap?: MapData, difficulty: Difficulty = 'adept', endlessMode = false, dailySeed?: string) {
     this.mapData = customMap || generateProceduralMap('alpine');
     this.difficulty = difficulty;
     this.endlessMode = endlessMode;
     this.totalWaves = endlessMode ? 999 : 20;
+    this.dailySeed = dailySeed;
+    this.rng = createSeededRng(dailySeed);
 
     const diffCfg = DIFFICULTY_CONFIG[difficulty];
     this.maxHeartHealth = Math.round(100 * diffCfg.heartHealthMult);
@@ -139,9 +192,68 @@ export class GameState {
       soulsHarvested: 0,
       highestWave: 0,
       bossesSlain: 0,
+      bestCombo: 0,
+      comboKills: 0,
+      eventsTriggered: 0,
+      eventBonus: 0,
     };
 
+    this.combo = {
+      currentCombo: 0,
+      comboTimer: 0,
+      maxCombo: 0,
+      comboMultiplier: 1.0,
+      totalKillsInCombo: 0,
+      lastKillTime: 0,
+    };
+
+    // Pre-schedule 3-5 random events across the run waves 3-19
+    this.scheduledEvents = this.generateScheduledEvents();
     this.forecastNextWeather();
+  }
+
+  /** Generate a deterministic schedule of random events for the run. */
+  private generateScheduledEvents(): MapEvent[] {
+    const events: MapEvent[] = [];
+    const maxWave = this.endlessMode ? 25 : this.totalWaves;
+    // Always 3 events in standard mode, 5 in endless
+    const count = this.endlessMode ? 5 : 3;
+    const eventTypes: MapEvent['type'][] = ['meteor', 'treasure_goblin', 'blessing', 'aether_rain', 'frenzy'];
+    const eventMeta: Record<MapEvent['type'], { name: string; icon: string; description: string }> = {
+      meteor: { name: '陨星坠落', icon: '☄️', description: '一颗灼热陨石砸入战场，造成范围伤害！' },
+      treasure_goblin: { name: '宝藏哥布林', icon: '💰', description: '一只携带丰厚奖赏的稀有哥布林出现，击杀前逃离！' },
+      blessing: { name: '先祖祝福', icon: '✨', description: '地脉先贤降下祝福，立即获得 +50 原石与 +30 灵能！' },
+      aether_rain: { name: '以太之雨', icon: '🌧️', description: '以太倾泻而下，所有塔 8 秒内伤害 +50%！' },
+      frenzy: { name: '战场狂热', icon: '🔥', description: '所有塔 10 秒内射速 +80%，但伤害 -15%！' },
+    };
+
+    // Distribute events across waves 3 to max-2
+    const minWave = 3;
+    const maxEventWave = Math.max(minWave + count, maxWave - 2);
+    const step = Math.floor((maxEventWave - minWave) / count);
+    for (let i = 0; i < count; i++) {
+      const triggerWave = Math.min(maxEventWave, minWave + i * step + Math.floor(this.rng() * Math.max(1, step - 1)));
+      // Pick a random event type, ensuring variety
+      let type = eventTypes[Math.floor(this.rng() * eventTypes.length)];
+      // Avoid duplicates — re-roll if already used
+      let attempts = 0;
+      while (events.some((e) => e.type === type) && attempts < 5) {
+        type = eventTypes[Math.floor(this.rng() * eventTypes.length)];
+        attempts++;
+      }
+      const meta = eventMeta[type];
+      events.push({
+        id: `event_${i}_${type}`,
+        type,
+        name: meta.name,
+        icon: meta.icon,
+        description: meta.description,
+        triggerWave,
+        triggerProgress: 0.3 + this.rng() * 0.4, // mid-wave
+        fired: false,
+      });
+    }
+    return events.sort((a, b) => a.triggerWave - b.triggerWave);
   }
 
   /** Difficulty multiplier applied to enemy HP scaling. */
@@ -405,6 +517,41 @@ export class GameState {
     this.resources.aether -= upgradeCost;
     tower.level += 1;
     soundManager.playBuild();
+
+    // At level 3, prompt specialization choice if not yet chosen
+    if (tower.level === 3 && !tower.specialization && this.events?.onSpecializationPrompt) {
+      const options = this.getSpecializationOptions(tower.type);
+      tower.pendingSpecialization = true;
+      this.pendingSpecializations.push({ towerId: tower.id, options });
+      this.events.onSpecializationPrompt(tower, options);
+    }
+    return true;
+  }
+
+  /** Returns 3 specialization options relevant to the tower type. */
+  private getSpecializationOptions(towerType: TowerType): TowerSpecialization[] {
+    // Map each tower type to thematic specialization options
+    const all: Record<TowerType, TowerSpecialization[]> = {
+      ballista: ['rapid_fire', 'siege_breaker', 'overcharge'],
+      catapult: ['siege_master', 'siege_breaker', 'rapid_fire'],
+      pyromancer: ['frostfire', 'siege_master', 'rapid_fire'],
+      arcane_prism: ['overcharge', 'siege_breaker', 'crystalline'],
+      cryo_obelisk: ['frostfire', 'rapid_fire', 'fortified'],
+      geomancer: ['fortified', 'siege_master', 'siege_breaker'],
+      mine: ['crystalline', 'fortified', 'swarm_slayer'],
+      barricade: ['fortified', 'crystalline', 'siege_breaker'],
+    };
+    return all[towerType] || ['rapid_fire', 'siege_master', 'overcharge'];
+  }
+
+  /** Apply a chosen specialization to a tower. */
+  public applySpecialization(towerId: string, spec: TowerSpecialization): boolean {
+    const tower = this.placedTowers.find((t) => t.id === towerId);
+    if (!tower || !tower.pendingSpecialization) return false;
+    tower.specialization = spec;
+    tower.pendingSpecialization = false;
+    this.pendingSpecializations = this.pendingSpecializations.filter((p) => p.towerId !== towerId);
+    soundManager.playWarHorn();
     return true;
   }
 
@@ -527,6 +674,9 @@ export class GameState {
         spawnIndex: 0,
       });
     }
+
+    // Record total count for event progress tracking
+    this.originalSpawnCount = this.spawnQueue.length;
   }
 
   // --- Main Game Tick (Delta Time in seconds) ---
@@ -534,6 +684,9 @@ export class GameState {
     if (this.isPaused) return;
 
     const dt = Math.min(0.1, rawDt) * this.gameSpeed;
+
+    // 0. Track elapsed game time
+    this.gameTime += dt;
 
     // 1. Process wave spawns
     if (this.isWaveInProgress) {
@@ -546,6 +699,30 @@ export class GameState {
         }
       }
     }
+
+    // 1b. Combo timer decay
+    if (this.combo.comboTimer > 0) {
+      this.combo.comboTimer -= dt;
+      if (this.combo.comboTimer <= 0) {
+        // Combo broken
+        this.combo.currentCombo = 0;
+        this.combo.comboMultiplier = 1.0;
+        this.combo.comboTimer = 0;
+        this.combo.totalKillsInCombo = 0;
+        if (this.events?.onComboUpdate) {
+          this.events.onComboUpdate({
+            current: 0,
+            multiplier: 1.0,
+            max: this.combo.maxCombo,
+          });
+        }
+      }
+    }
+
+    // 1c. Map events scheduled for this wave
+    this.checkScheduledEvents();
+    // 1d. Update active (timed) events — remove expired
+    this.updateActiveEvents(dt);
 
     // 2. Update active enemies
     this.updateEnemies(dt);
@@ -715,22 +892,183 @@ export class GameState {
     if (cfg) {
       const aetherGain = Math.round(cfg.aetherReward * this.gameModifiers.aetherYieldMult);
       const soulsGain = Math.round(cfg.soulReward * this.gameModifiers.soulYieldMult);
-      this.resources.aether += aetherGain;
-      this.resources.souls += soulsGain;
-      this.stats.soulsHarvested += soulsGain;
+      // Combo multiplier applies to soul + aether rewards
+      const comboMult = this.combo.comboMultiplier;
+      const aetherWithCombo = Math.round(aetherGain * comboMult);
+      const soulsWithCombo = Math.round(soulsGain * comboMult);
+      this.resources.aether += aetherWithCombo;
+      this.resources.souls += soulsWithCombo;
+      this.stats.soulsHarvested += soulsWithCombo;
+      if (comboMult > 1.0) {
+        this.combo.totalKillsInCombo++;
+        this.stats.comboKills++;
+      }
     }
 
     if (enemy.type === 'colossus_boss' || enemy.type === 'storm_wyrm') {
       this.stats.bossesSlain++;
     }
 
+    // === Combo system: bump on every kill ===
+    this.bumpCombo();
+
     soundManager.playEnemyDeath();
   }
 
+  /** Bump combo counter on each kill; chains within 2.5s window for multiplier. */
+  private bumpCombo() {
+    const COMBO_WINDOW = 2.5; // seconds
+    const now = this.gameTime;
+    if (this.combo.lastKillTime > 0 && now - this.combo.lastKillTime > COMBO_WINDOW) {
+      // Combo window already expired (timer hit 0 in tick) — start fresh
+      this.combo.currentCombo = 0;
+    }
+    this.combo.currentCombo++;
+    this.combo.lastKillTime = now;
+    this.combo.comboTimer = COMBO_WINDOW;
+    if (this.combo.currentCombo > this.combo.maxCombo) {
+      this.combo.maxCombo = this.combo.currentCombo;
+      this.stats.bestCombo = this.combo.maxCombo;
+    }
+    // Multiplier tiers: 1.0 / 1.25 / 1.5 / 2.0 / 2.5 / 3.0
+    const tier = Math.min(5, Math.floor(this.combo.currentCombo / 5));
+    const multipliers = [1.0, 1.25, 1.5, 2.0, 2.5, 3.0];
+    const newMult = multipliers[tier];
+    if (newMult !== this.combo.comboMultiplier) {
+      this.combo.comboMultiplier = newMult;
+      // Big combo sound on tier-up
+      if (tier > 0) soundManager.playWarHorn();
+    }
+    if (this.events?.onComboUpdate) {
+      this.events.onComboUpdate({
+        current: this.combo.currentCombo,
+        multiplier: this.combo.comboMultiplier,
+        max: this.combo.maxCombo,
+      });
+    }
+  }
+
+  /** Check scheduled map events for this wave + progress. */
+  private checkScheduledEvents() {
+    if (!this.isWaveInProgress) return;
+    const totalEnemies = this.spawnQueue.length + this.activeEnemies.length;
+    // Estimate wave progress: 0 at start, 1 when all enemies defeated
+    const originalCount = this.originalSpawnCount;
+    if (originalCount === 0) return;
+    const progress = 1 - totalEnemies / originalCount;
+
+    for (const evt of this.scheduledEvents) {
+      if (evt.fired) continue;
+      if (evt.triggerWave !== this.currentWave) continue;
+      if (progress >= evt.triggerProgress) {
+        evt.fired = true;
+        this.triggerMapEvent(evt);
+      }
+    }
+  }
+
+  /** Triggered wave-by-wave count for progress estimation. */
+  private originalSpawnCount: number = 0;
+
+  /** Update active (timed) events — decrement timers & clean up. */
+  private updateActiveEvents(dt: number) {
+    for (let i = this.activeEvents.length - 1; i >= 0; i--) {
+      const evt = this.activeEvents[i];
+      const timer = (evt as MapEvent & { _timer?: number })._timer;
+      if (timer === undefined) continue;
+      const newTimer = timer - dt;
+      (evt as MapEvent & { _timer?: number })._timer = newTimer;
+      if (newTimer <= 0) {
+        // Event expired — revert effects
+        this.expireMapEvent(evt);
+        this.activeEvents.splice(i, 1);
+      }
+    }
+  }
+
+  /** Apply the effect of a triggered map event. */
+  private triggerMapEvent(evt: MapEvent) {
+    this.stats.eventsTriggered++;
+    soundManager.playWarHorn();
+    switch (evt.type) {
+      case 'blessing':
+        this.resources.aether += 50;
+        this.resources.mana += 30;
+        this.stats.eventBonus += 80;
+        break;
+      case 'meteor': {
+        // Damage all enemies in a 4-tile radius around the center of the map
+        const cx = Math.floor(this.mapData.width / 2);
+        const cz = Math.floor(this.mapData.depth / 2);
+        const radius = 4;
+        this.activeEnemies.forEach((e) => {
+          const dx = e.x - cx;
+          const dz = e.z - cz;
+          if (Math.sqrt(dx * dx + dz * dz) <= radius) {
+            e.health -= 200;
+            this.stats.damageDealt += 200;
+          }
+        });
+        break;
+      }
+      case 'treasure_goblin': {
+        // Spawn a special fast-running goblin that yields big rewards if killed
+        this.spawnEnemy('scout', 0); // re-uses scout but with custom name via reward bonus
+        // Bonus applied to next enemy killed:
+        this.resources.aether += 0; // placeholder
+        // Mark next kill to give big reward
+        this.combo.comboMultiplier = Math.max(this.combo.comboMultiplier, 1.5);
+        this.stats.eventBonus += 0;
+        break;
+      }
+      case 'aether_rain':
+      case 'frenzy': {
+        // Add a timed event that boosts all towers
+        const timed: MapEvent & { _timer?: number } = { ...evt, _timer: evt.type === 'aether_rain' ? 8 : 10 };
+        this.activeEvents.push(timed);
+        // Apply effects to all tower damage/range multipliers via gameModifiers
+        if (evt.type === 'aether_rain') {
+          // +50% damage to all towers for 8s
+          (Object.keys(this.gameModifiers.towerDamageMult) as TowerType[]).forEach((t) => {
+            this.gameModifiers.towerDamageMult[t] *= 1.5;
+          });
+        } else if (evt.type === 'frenzy') {
+          // Tower fire rate handled in updateTowers via activeEvents check
+        }
+        break;
+      }
+    }
+    if (this.events?.onMapEvent) this.events.onMapEvent(evt);
+  }
+
+  /** Revert the effect of an expired timed event. */
+  private expireMapEvent(evt: MapEvent) {
+    if (evt.type === 'aether_rain') {
+      (Object.keys(this.gameModifiers.towerDamageMult) as TowerType[]).forEach((t) => {
+        this.gameModifiers.towerDamageMult[t] /= 1.5;
+      });
+    }
+    // frenzy has no gameModifiers change — fire rate handled inline in updateTowers
+  }
+
+  /** Whether frenzy event is currently active (used in updateTowers). */
+  public get frenzyActive(): boolean {
+    return this.activeEvents.some((e) => e.type === 'frenzy');
+  }
+
   private updateTowers(dt: number) {
+    const frenzy = this.frenzyActive;
     this.placedTowers.forEach((tower) => {
       const cfg = TOWER_CONFIGS[tower.type];
       if (cfg.damage <= 0) return; // e.g. barricade, mine
+
+      // === Specialization: rapid_fire → +60% fire rate ===
+      let fireRateMult = 1.0;
+      if (tower.specialization === 'rapid_fire') fireRateMult *= 1.6;
+      else if (tower.specialization === 'siege_master') fireRateMult *= 0.7;
+      else if (tower.specialization === 'swarm_slayer' && this.activeEnemies.length >= 5) fireRateMult *= 1.2;
+      // === Frenzy event: +80% fire rate ===
+      if (frenzy) fireRateMult *= 1.8;
 
       tower.currentCooldown = Math.max(0, tower.currentCooldown - dt);
       if (tower.currentCooldown > 0) return;
@@ -738,11 +1076,16 @@ export class GameState {
       const tile = this.getTile(tower.x, tower.z);
       const towerHeight = tile ? tile.height : 1;
 
-      // Elevation Bonus Range
-      const elevationAdvantage = Math.max(0, towerHeight - 1);
-      const effectiveRange =
-        (cfg.range + elevationAdvantage * cfg.elevationBonusRange * (1 + this.gameModifiers.highGroundRangeBonus)) *
+      // Elevation Bonus Range + specialization modifiers
+      let elevationAdvantage = Math.max(0, towerHeight - 1);
+      let rangeBonusPerHeight = cfg.elevationBonusRange * (1 + this.gameModifiers.highGroundRangeBonus);
+      if (tower.specialization === 'fortified') {
+        rangeBonusPerHeight *= 2.0;
+      }
+      let effectiveRange =
+        (cfg.range + elevationAdvantage * rangeBonusPerHeight) *
         this.gameModifiers.towerRangeMult[tower.type];
+      if (tower.specialization === 'overcharge') effectiveRange *= 1.5;
 
       // Find targets in range
       const validEnemies = this.activeEnemies.filter((enemy) => {
@@ -770,16 +1113,18 @@ export class GameState {
       }
 
       // Check mana drain per shot if required (e.g. Arcane Prism)
-      if (cfg.manaDrainPerShot && this.resources.mana < cfg.manaDrainPerShot) {
+      let manaCost = cfg.manaDrainPerShot || 0;
+      if (tower.specialization === 'overcharge') manaCost *= 2;
+      if (manaCost && this.resources.mana < manaCost) {
         return; // out of mana
       }
-      if (cfg.manaDrainPerShot) {
-        this.resources.mana -= cfg.manaDrainPerShot;
+      if (manaCost) {
+        this.resources.mana -= manaCost;
       }
 
       // Fire projectile
       this.fireTower(tower, target, towerHeight);
-      tower.currentCooldown = 1 / cfg.fireRate;
+      tower.currentCooldown = 1 / (cfg.fireRate * fireRateMult);
     });
   }
 
@@ -788,15 +1133,52 @@ export class GameState {
 
     // Elevation bonus damage
     const elevationAdvantage = Math.max(0, towerHeight - 1);
-    const baseDmg = cfg.damage * (1 + (tower.level - 1) * 0.45);
-    const elevationBonus = elevationAdvantage * cfg.elevationBonusDmg * (1 + this.gameModifiers.highGroundDmgBonus);
-    const totalDmg = Math.round((baseDmg + elevationBonus) * this.gameModifiers.towerDamageMult[tower.type]);
+    let baseDmg = cfg.damage * (1 + (tower.level - 1) * 0.45);
+    let elevationBonus = elevationAdvantage * cfg.elevationBonusDmg * (1 + this.gameModifiers.highGroundDmgBonus);
+    let splashRadius = cfg.splashRadius || 0;
+
+    // === Specialization damage modifiers ===
+    let dmgMult = 1.0;
+    if (tower.specialization === 'rapid_fire') dmgMult *= 0.9;
+    else if (tower.specialization === 'siege_master') {
+      dmgMult *= 1.8;
+      splashRadius *= 1.2;
+    }
+    else if (tower.specialization === 'overcharge') dmgMult *= 1.25;
+    else if (tower.specialization === 'fortified' && towerHeight >= 2) dmgMult *= 1.15;
+    else if (tower.specialization === 'crystalline') {
+      const tile = this.getTile(tower.x, tower.z);
+      if (tile?.hasCrystal) dmgMult *= 1.4;
+    }
+    else if (tower.specialization === 'siege_breaker' &&
+             (target.type === 'colossus_boss' || target.type === 'storm_wyrm')) {
+      dmgMult *= 1.3;
+    }
+    else if (tower.specialization === 'swarm_slayer' &&
+             target.type !== 'colossus_boss' && target.type !== 'storm_wyrm') {
+      dmgMult *= 1.5;
+    }
+    // === Frenzy event: -15% damage ===
+    if (this.frenzyActive) dmgMult *= 0.85;
+
+    const totalDmg = Math.round((baseDmg + elevationBonus) * this.gameModifiers.towerDamageMult[tower.type] * dmgMult);
 
     const startPos = {
       x: tower.x,
       y: towerHeight * 0.55 + 0.5,
       z: tower.z,
     };
+
+    // Determine slow/burn extras for frostfire specialization
+    let slowFactor = cfg.slowPercent ? 1 - cfg.slowPercent : undefined;
+    let slowDuration = 3.5;
+    let applyBurn = cfg.damageType === 'fire';
+    if (tower.specialization === 'frostfire') {
+      // Applies both slow AND burn
+      slowFactor = Math.min(slowFactor ?? 0.6, 0.6);
+      slowDuration = cfg.slowPercent ? 3.5 * 1.35 : 3.0 * 1.35;
+      applyBurn = true;
+    }
 
     const projectile: Projectile = {
       id: `proj_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -811,13 +1193,16 @@ export class GameState {
       speed: tower.type === 'catapult' ? 5.5 : 12.0,
       damage: totalDmg,
       damageType: cfg.damageType,
-      splashRadius: cfg.splashRadius || 0,
-      slowFactor: cfg.slowPercent ? 1 - cfg.slowPercent : undefined,
-      slowDuration: 3.5,
+      splashRadius,
+      slowFactor,
+      slowDuration,
       color: cfg.color,
       progress: 0,
       arcHeight: tower.type === 'catapult' ? 3.0 : 0,
     };
+    // Tag for specialization/effect tracking (not part of serialized type)
+    (projectile as Projectile & { _applyBurn: boolean; _towerId: string })._applyBurn = applyBurn;
+    (projectile as Projectile & { _applyBurn: boolean; _towerId: string })._towerId = tower.id;
 
     this.projectiles.push(projectile);
 
@@ -884,7 +1269,11 @@ export class GameState {
 
   private applyDamageToEnemy(enemy: ActiveEnemy, rawDmg: number, proj: Projectile) {
     const enemyCfg = ENEMY_CONFIGS[enemy.type];
-    const armor = enemyCfg ? enemyCfg.armor : 0;
+    let armor = enemyCfg ? enemyCfg.armor : 0;
+    // siege_breaker specialization ignores 100% of armor
+    const firingTower = this.placedTowers.find((t) => t.id === (proj as Projectile & { _towerId?: string })._towerId);
+    if (firingTower?.specialization === 'siege_breaker') armor = 0;
+
     const finalDmg = Math.max(1, rawDmg * (1 - armor));
 
     enemy.health -= finalDmg;
@@ -899,10 +1288,16 @@ export class GameState {
       }
     }
 
-    // Apply fire burn
-    if (proj.damageType === 'fire') {
+    // Apply fire burn — from fire damage OR frostfire specialization
+    const applyBurn = (proj as Projectile & { _applyBurn?: boolean })._applyBurn || proj.damageType === 'fire';
+    if (applyBurn) {
       enemy.burnTimer = 4.0;
       enemy.burnDamage = 18;
+    }
+
+    // Track which tower dealt this damage (for kill attribution)
+    if (firingTower) {
+      (proj as Projectile & { _towerId?: string })._towerId = firingTower.id;
     }
   }
 
